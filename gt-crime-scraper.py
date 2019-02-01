@@ -24,14 +24,16 @@ def scrape(scrape_output_dir="./scraped",
             print("Processing entries {} through {}".format(entries_processed, entries_processed + process_chunk))
 
             params = {"offset": str(entries_processed)}
-            result = requests.get("http://police.gatech.edu/crimelog.php", params)
 
-            if result.status_code != 200:
-                if retry_count > max_retries:
+            try:
+                result = requests.get("http://police.gatech.edu/crimelog.php", params)
+                result.raise_for_status()
+            except requests.exceptions.HTTPError:
+                if retry_count >= max_retries:
                     print("Exceeded maximum retry count, aborting.")
                     exit(1)
                 else:
-                    print("Request {} failed, retrying...".format(result.url))
+                    print("Request for entries starting at {} failed, retrying...".format(entries_processed))
                     retry_count += 1
                     continue
 
