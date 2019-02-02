@@ -22,20 +22,23 @@ def _process_html(string, output_writer, log_type):
 
     # For some reason each table is formatted slightly differently, so we have to account for that.
     if log_type == LogType.crime:
-        data1_list = [data1 for data1 in table.find_all("tr") if len(data1.attrs) == 1 or 2 and "bgcolor" in data1.attrs]
+        data1_list = [data1 for data1 in table.find_all("tr") if len(data1.attrs) == 1 and "bgcolor" in data1.attrs]
         data2_list = [data2 for data2 in table.find_all("tr", class_="body")]
     elif log_type == LogType.noncrime:
         data1_list = [data1 for data1 in table.find_all("tr") if len(data1.attrs) == 2 and "id" in data1.attrs and "row" in data1.attrs["id"]]
         data2_list = [data2 for data2 in table.find_all("tr", class_="body")]
 
     for data1, data2 in zip(data1_list, data2_list):
-        row = [re.sub(r'[\n\t]', '', value.text) for value in data1.find_all("td", limit=5)]
+        row = [re.sub(r'[\r\n\t]', '', value.text) for value in data1.find_all("td", limit=5)]
         data2str = data2.find("td").text
         location_str = re.search(r'Location:(.*)\n', data2str).group(1)
         nature_str = re.search(r'Nature:(.*)\n', data2str).group(1)
-        row.append(re.sub(r'[\n\t]', '', location_str).strip())
-        row.append(re.sub(r'[\n\t]', '', nature_str).strip())
+        row.append(re.sub(r'[\r\n\t]', '', location_str).strip())
+        row.append(re.sub(r'[\r\n\t]', '', nature_str).strip())
         output_writer.writerow(row)
+
+    total_entry_count = table.find("span", style="font-weight: bold", string="of").parent.text.split()[-1]
+    return int(total_entry_count)
 
 def scrape(scrape_output_dir="./scraped",
            starting_offset=0,
@@ -46,26 +49,26 @@ def scrape(scrape_output_dir="./scraped",
     os.makedirs(out_dir)
 
     process_chunk = 100  # how many entries (we think) are getting retrieved per request
-    entries_processed = starting_offset
     retry_count = 0
 
     for log_type in LogType:
+        total_entries = max_entries
+        entries_processed = starting_offset
         with open(os.path.join(out_dir, 'scrape-result-{}.csv'.format(log_type.value)), 'w') as output_file:
             output_writer = csv.writer(output_file)
             output_writer.writerow(["Case #", "Date Reported", "Occurrence Interval", "Disposition", "Status", "Location", "Nature"])
-            if max_entries == 0: max_entries = sys.maxsize
 
             if local_files_path is None:
-                while entries_processed < max_entries:
+                while total_entries == 0 or entries_processed < total_entries:
                     print("Processing entries {} through {}".format(entries_processed, entries_processed + process_chunk))
 
                     params = {"offset": str(entries_processed)}
 
                     try:
-                        result = requests.get("http://police.gatech.edu/{}.php".format(log_type.value), params)
+                        result = requests.get("http://police.gatech.edu/{}log.php".format(log_type.value), params)
                         result.raise_for_status()
                     except requests.exceptions.HTTPError:
-                        if retry_count >= max_retries:
+                        if max_retries != 0 and retry_count >= max_retries:
                             print("Exceeded maximum retry count, aborting.")
                             exit(1)
                         else:
@@ -73,12 +76,15 @@ def scrape(scrape_output_dir="./scraped",
                             retry_count += 1
                             continue
 
+                    retry_count = 0
                     # Write fetched html to file, naming it [start-entry]-[end-entry]
                     with open(os.path.join(out_dir, "{}-{}-{}.html"
                             .format(log_type.value, entries_processed, entries_processed + process_chunk)), 'w') as result_html_file:
                         result_html_file.write(result.text)
 
-                    _process_html(result.text, output_writer, LogType.noncrime)
+                    reported_total_entries = _process_html(result.text, output_writer, log_type)
+                    if total_entries == 0:
+                        total_entries = reported_total_entries
 
                     entries_processed += process_chunk
             else:
@@ -87,7 +93,7 @@ def scrape(scrape_output_dir="./scraped",
                                if os.path.isfile(os.path.join(local_files_path, file)) and file.endswith(".html")]
                 for filename in local_files:
                     with open(os.path.join(local_files_path, filename), 'r') as file:
-                        _process_html(file.read(), output_writer, LogType.noncrime)
+                        _process_html(file.read(), output_writer, log_type)
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser(description="Scrape GTPD crime/non-crime logs")
