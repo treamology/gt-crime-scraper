@@ -30,6 +30,13 @@ def _process_html(string, output_writer, log_type):
 
     for data1, data2 in zip(data1_list, data2_list):
         row = [re.sub(r'[\r\n\t]', '', value.text) for value in data1.find_all("td", limit=5)]
+
+        # Format the date column into year-first format.
+        try:
+            row[1] = datetime.strptime(row[1], "%m/%d/%Y").strftime("%y/%m/%d")
+        except ValueError:
+            pass
+
         data2str = data2.find("td").text
         location_str = re.search(r'Location:(.*)\n', data2str).group(1)
         nature_str = re.search(r'Nature:(.*)\n', data2str).group(1)
@@ -90,7 +97,7 @@ def scrape(scrape_output_dir="./scraped",
             else:
                 # We have a local set of previously-fetched files to use.
                 local_files = [file for file in os.listdir(local_files_path)
-                               if os.path.isfile(os.path.join(local_files_path, file)) and file.endswith(".html")]
+                               if os.path.isfile(os.path.join(local_files_path, file)) and file.startswith(log_type.value) and file.endswith(".html")]
                 for filename in local_files:
                     with open(os.path.join(local_files_path, filename), 'r') as file:
                         _process_html(file.read(), output_writer, log_type)
